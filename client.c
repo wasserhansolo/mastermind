@@ -7,11 +7,11 @@
 #include <netdb.h>
 #include <string.h>
 #include <unistd.h>
+#include <time.h>
 
 #define WRITE_BYTES (1)
 
-/* Name of the program */
-static const char *progname = "client"; /* default name */
+
 
 /* File descriptor for server socket */
 static int sockfd = -1;
@@ -19,19 +19,85 @@ static int sockfd = -1;
 /* File descriptor for connection socket */
 static int connfd = -1;
 
+
+/**
+ * @brief opens the client socket
+ * @param server_hostname the name of the server (IP Adress)
+ * @param server_service service name or port number
+ * @return client socket
+ */
+
 static int open_client_socket(char* const server_hostname, const char* server_service);
+
+/* print usage message */
+static void usage();
+
+/**
+ * @brief calculates the next guess to send to the server
+ * @return random guess of the order and parity bit set.
+ */
+uint16_t next_tipp(void);
+
+static int round = 0;
 
 int main(int argc, char *argv[])
 {
- 
-    connfd = open_client_socket("localhost","12345");
-    if(connfd<0){printf("Connection failed");}else{printf("Connection super");}
+    if(argc != 3){ usage(); return(EXIT_FAILURE);}
+    connfd = open_client_socket(argv[1],argv[2]);
+    if(connfd<0){return(EXIT_FAILURE);}else{printf("Connection established");}
 
     uint8_t buffer;
-	uint16_t next_tipp=0x0002; //todo: programmlogik usw. zum senden
+	uint16_t next_tipp_send;
     
-       send(connfd, &next_tipp, 2, 0);
+    
+    do {
+		round++;
+		next_tipp_send = next_tipp();
+		send(connfd, &next_tipp_send, 2, 0);
+       // DEBUG("Sent 0x%x\n", next_tipp_send);
+		printf("Sent 0x%x\n", next_tipp_send);
+		recv(connfd, &buffer, 1, 0);
+       // DEBUG("Got byte 0x%x\n", buffer);
+		printf("Got byte 0x%x\n", buffer);
+        
+        int red, white;
+        
+        red = buffer & 7;
+        white = (buffer >> 3) & 7;
+        printf("red: %i",red);
+        printf("white: %i",white);
+        
+        
+		errno = 0;
+		switch (buffer >> 6) {
+			case 1:
+				fprintf(stderr, "\nParity Error\n");
+				return 2;
+			case 2:
+				fprintf(stderr, "\nGame Lost\n");
+				return 3;
+			case 3:
+				fprintf(stderr, "\nParity error, game lost\n");
+				return 4;
+			default:
+				break;
+		}
+		
+		
+		if ((buffer & 7) == 5 ) {
+            printf("\nRunden: %i", round);
+			return 0;
+		}
+		
+	} while (1);
 
+}
+
+static void usage(){
+    printf("\nClient: SYNOPSIS");
+    printf("\nclient <server-hostname> <server-port>");
+    printf("\nEXAMPLE");
+    printf("\nclient localhost 1280\n");
 }
 
 static int open_client_socket(char* const server_hostname, const char* server_service)
@@ -92,24 +158,29 @@ static int open_client_socket(char* const server_hostname, const char* server_se
 	return sockfd;
 }
 
-
-static void bail_out(int eval, const char *fmt, ...)
+uint16_t next_tipp(void)
 {
-    va_list ap;
-    
-    (void) fprintf(stderr, "%s: ", progname);
-    if (fmt != NULL) {
-        va_start(ap, fmt);
-        (void) vfprintf(stderr, fmt, ap);
-        va_end(ap);
-    }
-    if (errno != 0) {
-        (void) fprintf(stderr, ": %s", strerror(errno));
-    }
-    (void) fprintf(stderr, "\n");
-    
-    free_resources();
-    exit(eval);
+    //not really logic, more random bruteforce
+    srand(time(NULL));
+    int r = (uint16_t)rand();
+	uint16_t selected_colors = r << round;
+    selected_colors |= round;
+	
+    uint16_t parity = 0;
+	for (int i = 0; i < 15; i++) {
+		parity ^= (selected_colors % (1 << (i+1))) >> i;
+	}
+	
+	// paraty del cheat ...
+	selected_colors <<= 1;
+	selected_colors >>= 1;
+	
+	parity <<= 15;
+	
+	return selected_colors | parity;
 }
+
+
+
 
 
